@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>二维码扫描器</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        #video-container { position: relative; width: 100%; height: 0; padding-bottom: 75%; /* 4:3 比例 */ }
+        #preview { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        #result { margin-top: 15px; width: 100%; padding: 10px; font-size: 16px; }
+        button { width: 100%; padding: 12px; margin-top: 15px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+        button:disabled { background-color: #cccccc; }
+        .scanner-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+        .scan-box { width: 70%; height: 70%; border: 2px dashed white; box-shadow: 0 0 0 1000px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h3>扫描二维码</h3>
+        
+        <div id="video-container">
+            <video id="preview" autoplay muted playsinline></video>
+            <div class="scanner-overlay">
+                <div class="scan-box"></div>
+            </div>
+        </div>
+        
+        <input type="text" id="result" placeholder="扫描结果将自动填充到此处" readonly>
+        
+        <button id="startBtn">开始扫描</button>
+        <button id="stopBtn" disabled>停止扫描</button>
+    </div>
+
+    <!-- 引入 jsQR 库 -->
+    <!-- <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script> -->
+	<script src="./jsqr.min.js"></script>
+	
+
+    <script>
+        // 获取DOM元素
+        const video = document.getElementById('preview');
+        const resultInput = document.getElementById('result');
+        const startButton = document.getElementById('startBtn');
+        const stopButton = document.getElementById('stopBtn');
+        
+        let canvasElement = document.createElement('canvas');
+        let canvas = canvasElement.getContext('2d');
+        let scanning = false;
+        let stream = null;
+
+        // 检查浏览器兼容性
+        function checkCompatibility() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('您的浏览器不支持摄像头API，无法使用此功能');
+                startButton.disabled = true;
+                return false;
+            }
+            return true;
+        }
+
+        // 开始扫描
+        async function startScanner() {
+            if (!checkCompatibility()) return;
+            
+            try {
+                // 请求摄像头权限并获取视频流
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } // 使用后置摄像头
+                });
+                
+                // 设置视频源
+                video.srcObject = stream;
+                video.setAttribute('playsinline', true); // iOS Safari 支持
+                
+                // 视频元数据加载完成后开始扫描
+                video.onloadedmetadata = () => {
+                    canvasElement.width = video.videoWidth;
+                    canvasElement.height = video.videoHeight;
+                    scanning = true;
+                    startButton.disabled = true;
+                    stopButton.disabled = false;
+                    requestAnimationFrame(tick);
+                };
+                
+            } catch (error) {
+                console.error('获取摄像头失败:', error);
+                alert('无法访问摄像头，请确保已授予权限');
+            }
+        }
+
+        // 停止扫描
+        function stopScanner() {
+            scanning = false;
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            video.srcObject = null;
+            startButton.disabled = false;
+            stopButton.disabled = true;
+        }
+
+        // 视频帧处理循环
+        function tick() {
+            if (!scanning) return;
+            
+            // 绘制当前视频帧到canvas
+            canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+            
+            // 获取图像数据
+            const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+            
+            // 使用jsQR库检测二维码
+            const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: "dontInvert",
+            });
+            
+            // 如果检测到二维码
+            if (code) {
+                // 在视频上绘制检测到的二维码边界
+                drawCodeOutline(code);
+                
+                // 填充结果到input框
+                resultInput.value = code.data;
+                
+                // 扫描成功后可以选择自动停止
+                // stopScanner();
+            }
+            
+            // 继续下一帧处理
+            requestAnimationFrame(tick);
+        }
+
+        // 绘制二维码边界
+        function drawCodeOutline(code) {
+            const points = code.location;
+            
+            canvas.beginPath();
+            canvas.moveTo(points.topLeftCorner.x, points.topLeftCorner.y);
+            canvas.lineTo(points.topRightCorner.x, points.topRightCorner.y);
+            canvas.lineTo(points.bottomRightCorner.x, points.bottomRightCorner.y);
+            canvas.lineTo(points.bottomLeftCorner.x, points.bottomLeftCorner.y);
+            canvas.closePath();
+            
+            canvas.lineWidth = 4;
+            canvas.strokeStyle = "#4CAF50";
+            canvas.stroke();
+        }
+
+        // 绑定按钮事件
+        startButton.addEventListener('click', startScanner);
+        stopButton.addEventListener('click', stopScanner);
+    </script>
+</body>
+</html>
